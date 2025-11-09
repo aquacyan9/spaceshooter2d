@@ -1,0 +1,1755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Space Shooter</title>
+    <!-- Load Tailwind CSS for utility classes --><script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Three.js/Tone.js --><script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <!-- Load Orbitron font for splash screen -->
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            /* UPDATED: Changed from 10vh to 100vh for full vertical centering */
+            min-height: 100vh; 
+            background-color: #0d0d1a; /* Dark space background */
+            color: #ffffff;
+        }
+        #game-container {
+            position: relative;
+            max-width: 95vw; 
+            width: 800px;
+            aspect-ratio: 16 / 10;
+            box-shadow: 0 0 40px rgba(100, 100, 255, 0.5);
+            border: 4px solid #4a4e8d;
+            border-radius: 1rem;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            background-color: #000000;
+            transition: transform 0.05s ease-out; /* Smooth transition for screen shake reset */
+        }
+        #gameCanvas {
+            width: 100%;
+            height: 100%;
+            background-color: #000000;
+            display: block;
+        }
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.8);
+            text-align: center;
+            padding: 1rem;
+            transition: opacity 0.3s ease-in-out; 
+            opacity: 1; 
+            pointer-events: auto; 
+        }
+        #overlay.hidden {
+            opacity: 0;
+            pointer-events: none; 
+            display: none; 
+        }
+
+        .message-box {
+            background-color: #1a1a2e;
+            padding: 2rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 0 20px rgba(74, 78, 141, 0.8);
+            max-width: 90%;
+        }
+        .glow-button {
+            transition: all 0.2s ease;
+            box-shadow: 0 0 10px rgba(100, 100, 255, 0.5);
+        }
+        .glow-button:hover {
+            box-shadow: 0 0 20px rgba(100, 100, 255, 1);
+            transform: translateY(-2px);
+        }
+
+        #splash-logo {
+            font-family: 'Orbitron', sans-serif;
+            background: linear-gradient(120deg, #05D5F2, #f472b6, #ec4899); 
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-fill-color: transparent;
+            /* Animation removed for static logo */
+        }
+
+        .loading-text {
+            font-family: 'Inter', sans-serif;
+            font-size: 1.25rem; 
+            color: #9ca3af; 
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            animation: pulse-subtle 2s ease-in-out infinite alternate;
+            margin-top: 1rem;
+        }
+        
+        /* pulse-glow keyframes removed */
+
+        @keyframes pulse-subtle {
+            from {
+                opacity: 0.7;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- Splash Screen -->
+    <div id="splash-screen" class="absolute top-0 left-0 w-full h-full flex justify-center items-center bg-black z-50 transition-opacity duration-1000 ease-in-out">
+        <div class="text-center">
+            <!-- This is the original D-13 text -->
+            <h1 id="splash-logo" class="text-7xl font-bold">D-13 Games</h1> 
+            <p class="loading-text">Loading...</p>
+        </div>
+    </div>
+
+    <div id="overlay" class="hidden"> 
+        <div class="message-box">
+            <h1 class="text-4xl font-bold text-indigo-400 mb-4" id="overlay-title">Space Shooter</h1>
+            <p class="text-lg mb-6" id="overlay-message">Defend the sector against the alien invasion!</p>
+            <button id="startButton" class="glow-button bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-lg text-xl uppercase tracking-wider">
+                Start Game
+            </button>
+            
+            <div id="mobile-controls-info" class="text-sm text-gray-400 mt-6">
+                <p>Use <b>A/D</b> or <b>Left/Right Arrows</b> to move.</p>
+                <p>Use <b>Spacebar</bb> to shoot.</p>
+                <p class="md:hidden mt-2">Tap anywhere to shoot. Swipe Left/Right to move.</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="mobile-controls" class="absolute bottom-0 left-0 right-0 p-3 flex justify-between md:hidden">
+        <button id="moveLeft" class="bg-gray-800/70 text-white p-3 rounded-full text-2xl shadow-lg border border-gray-600">◀</button>
+        <button id="moveRight" class="bg-gray-800/70 text-white p-3 rounded-full text-2xl shadow-lg border border-gray-600">▶</button>
+    </div>
+</div>
+
+<script>
+    // --- Global Game Setup ---
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const overlay = document.getElementById('overlay');
+    const startButton = document.getElementById('startButton');
+    const gameContainer = document.getElementById('game-container'); // Get container for shake effect
+
+    let gameLoopId;
+    let gameState = 'START'; // START, PLAYING, GAME_OVER
+    let score = 0;
+    let lastTime = 0;
+    const FPS = 60;
+    const FRAME_INTERVAL = 1000 / FPS;
+    let soundScheduleOffset = 0.001; 
+    
+    // --- BOSS CONFIGURATION (Updated for Progressive Difficulty) ---
+    const BOSS_BASE_SPAWN_INTERVAL = 400; // Bosses spawn at 400, 800, 1200, etc.
+    let currentBoss = null;
+    let currentBossIndex = 0; // 0=No Boss, 1=Boss 1 (1 stage), 2=Boss 2 (2 stages), etc.
+    let screenShakeTimer = 0;
+    const SCREEN_SHAKE_DURATION = 15; // frames
+    const SCREEN_SHAKE_INTENSITY = 6; // pixels
+    
+    // --- NEW BOSS CYCLE MECHANICS ---
+    const BOSS_RAPID_FIRE_CYCLE_MS = 20000; // 20 seconds total (10s ON + 10s OFF)
+    const BOSS_RAPID_FIRE_DURATION_MS = 10000; // 10 seconds ON
+    let rapidFireCycleStartTime = 0; // Tracks the start time of the current boss's cycle
+    
+    // --- Rapid Shot Constants (Removed Boss Rapid Fire, added Player Rapid Fire) ---
+    
+    // --- Game Entities ---
+    const PLAYER = {
+        x: 0, y: 0, size: 40, dx: 0, speed: 6,
+        bullets: [], maxBullets: 3, lastShotTime: 0, fireRate: 300, 
+        lives: 3, 
+        isInvincible: false, 
+        invincibilityDuration: 2000, 
+        invincibilityStartTime: 0,
+        
+        // --- NEW POWERUP STATE ---
+        isDoubleShot: false,
+        doubleShotEndTime: 0,
+        DOUBLE_SHOT_DURATION: 10000, // 10 seconds
+        
+        // --- PLAYER RAPID FIRE STATE (NEW) ---
+        isRapidFire: false,
+        rapidFireEndTime: 0,
+        RAPID_FIRE_DURATION: 8000, // 8 seconds (Collectible duration)
+        RAPID_FIRE_RATE: 80, // New rapid fire rate (80ms instead of 300ms)
+    };
+    
+    // Maximum number of lives the player can have
+    const MAX_LIVES = 5; 
+
+    let enemies = [];
+    let enemySpawnTimer = 0;
+    const ENEMY_SPAWN_RATE = 120; 
+    const ENEMY_FIRE_CHANCE = 0.005; 
+    let enemyBullets = []; 
+    let explosions = []; 
+    let collectibles = []; 
+    
+    // --- Collectible Drop Configuration ---
+    const DROP_CHANCE = 0.10; // Overall drop chance
+    const DOUBLE_SHOT_CHANCE = 0.30; 
+    const ENERGY_CELL_CHANCE = 0.20; 
+    const RAPID_FIRE_CHANCE = 0.20; // NEW: Chance for Rapid Fire collectible
+
+    // --- Input Tracking ---
+    const keys = {
+        A: false, D: false,
+        ArrowLeft: false, ArrowRight: false,
+        Space: false
+    };
+
+    // --- Tone.js Audio Setup (Initialisation and Playback functions) ---
+    let synth;
+    let bass;
+    let loop;
+    let laserSynth; 
+    let enemyLaserSynth; 
+    let explosionSynth; 
+    let gameOverSynth; 
+    let collectSynth; 
+    let powerupSynth; 
+
+    function initAudio() {
+        Tone.Master.volume.value = -29; 
+
+        synth = new Tone.PolySynth(Tone.Synth, {
+            oscillator: { type: 'square' }, 
+            envelope: {
+                attack: 0.01, decay: 0.15, sustain: 0, release: 0.1
+            } 
+        }).toDestination();
+        synth.set({ volume: -20 }); 
+
+        bass = new Tone.MonoSynth({
+            oscillator: { type: 'sawtooth' }, 
+            envelope: {
+                attack: 0.01, decay: 0.1, sustain: 0.5, release: 0.5
+            }
+        }).toDestination();
+        bass.set({ volume: -9 }); 
+        
+        laserSynth = new Tone.FMSynth({
+            oscillator: { type: 'square' },
+            envelope: {
+                attack: 0.001,
+                decay: 0.1, 
+                sustain: 0.0,
+                release: 0.1
+            },
+            modulationIndex: 10, 
+            modulation: {
+                type: 'sawtooth'
+            },
+            volume: -5 
+        }).toDestination();
+        
+        enemyLaserSynth = new Tone.FMSynth({
+            oscillator: { type: 'triangle' }, 
+            envelope: {
+                attack: 0.001,
+                decay: 0.15, 
+                sustain: 0.0,
+                release: 0.1
+            },
+            modulationIndex: 5, 
+            modulation: {
+                type: 'square'
+            },
+            volume: -8 
+        }).toDestination();
+
+
+        explosionSynth = new Tone.NoiseSynth({
+            noise: { type: 'pink' },
+            envelope: {
+                attack: 0.001,
+                decay: 0.2, 
+                sustain: 0.0,
+                release: 0.1
+            },
+            volume: -2
+        }).toDestination();
+        
+        gameOverSynth = new Tone.MonoSynth({
+            oscillator: { type: 'square' }, 
+            filter: {
+                Q: 5, 
+                frequency: 400 
+            },
+            filterEnvelope: { 
+                attack: 0.05,
+                decay: 0.5,
+                sustain: 0.1,
+                release: 1,
+                baseFrequency: 50,
+                octaves: 5 
+            },
+            envelope: {
+                attack: 0.1,
+                decay: 0.5,
+                sustain: 0,
+                release: 2.0 
+            },
+            volume: -5 
+        }).toDestination();
+
+        collectSynth = new Tone.Synth({
+            oscillator: { type: 'sine' },
+            envelope: {
+                attack: 0.005,
+                decay: 0.05,
+                sustain: 0.0,
+                release: 0.1
+            },
+            volume: -10 
+        }).toDestination();
+
+        // Powerup Sound (Used for Double Shot and Energy)
+        powerupSynth = new Tone.MembraneSynth({
+            pitchDecay: 0.008,
+            octaves: 2,
+            envelope: {
+                attack: 0.001,
+                decay: 0.2,
+                sustain: 0,
+            },
+            volume: -5
+        }).toDestination();
+
+
+        const melody = ['D4', 'E4', 'F4', 'E4', 'D4', 'C4', 'A3', 'G3'];
+        let melodyIndex = 0;
+
+        loop = new Tone.Loop(time => {
+            synth.triggerAttackRelease(melody[melodyIndex % melody.length], '8n', time);
+            
+            if (melodyIndex % 4 === 0) {
+                bass.triggerAttackRelease('D2', '4n', time); 
+            } else if (melodyIndex % 4 === 2) {
+                bass.triggerAttackRelease('A1', '4n', time); 
+            }
+
+            melodyIndex++;
+        }, '8n').start(0); 
+        
+        Tone.Transport.bpm.value = 140; 
+    }
+    
+    function playSoundGameOver() {
+        gameOverSynth.triggerAttackRelease('F#2', '0.5', Tone.now());
+        gameOverSynth.triggerAttackRelease('C2', '2.0', Tone.now() + 0.1); 
+    }
+
+    function playCollectSound(type) {
+        if (type === 'energy') {
+            collectSynth.triggerAttackRelease('G5', '0.1'); 
+            collectSynth.triggerAttackRelease('C6', '0.1', Tone.now() + 0.05); 
+        } else if (type === 'doubleshot') {
+            powerupSynth.triggerAttackRelease('C4', '0.2');
+            powerupSynth.triggerAttackRelease('G4', '0.2', Tone.now() + 0.1);
+        } else if (type === 'rapidfire') { // NEW: Distinct sound for rapid fire
+            powerupSynth.triggerAttackRelease('C5', '0.05');
+            powerupSynth.triggerAttackRelease('E5', '0.05', Tone.now() + 0.05);
+            powerupSynth.triggerAttackRelease('G5', '0.05', Tone.now() + 0.1);
+        } else {
+            collectSynth.triggerAttackRelease('C5', '0.08'); 
+        }
+    }
+
+
+    // --- Custom Player Drawing Function ---
+    function drawPlayer(ctx) {
+        const size = PLAYER.size;
+        const halfSize = size / 2;
+        const now = performance.now();
+
+        ctx.lineWidth = 2;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+
+        // 1. Thruster Flames
+        const flicker = Math.sin(now * 0.01) * 3 + 6;
+        const flameColor = `rgba(255, 100, 0, ${0.7 + Math.random() * 0.3})`;
+        
+        ctx.fillStyle = flameColor; 
+        ctx.beginPath();
+        // Left Thruster
+        ctx.moveTo(-halfSize * 0.6, halfSize * 0.8);
+        ctx.lineTo(-halfSize * 0.4, halfSize * 0.8);
+        ctx.lineTo(-halfSize * 0.5, size * 0.9 + flicker);
+        ctx.closePath();
+        ctx.fill();
+
+        // Right Thruster
+        ctx.beginPath();
+        ctx.moveTo(halfSize * 0.6, halfSize * 0.8);
+        ctx.lineTo(halfSize * 0.4, halfSize * 0.8);
+        ctx.lineTo(halfSize * 0.5, size * 0.9 + flicker);
+        ctx.closePath();
+        ctx.fill();
+
+
+        // 2. Main Body 
+        ctx.fillStyle = '#2c3e50'; 
+        ctx.strokeStyle = '#e6f7ff'; 
+        
+        ctx.beginPath();
+        ctx.moveTo(0, -halfSize * 0.9);
+        ctx.lineTo(-halfSize, halfSize * 0.6);
+        ctx.lineTo(-halfSize * 0.7, halfSize * 0.7);
+        ctx.lineTo(-halfSize * 0.6, halfSize * 0.8);
+        ctx.lineTo(halfSize * 0.6, halfSize * 0.8);
+        ctx.lineTo(halfSize * 0.7, halfSize * 0.7);
+        ctx.lineTo(halfSize, halfSize * 0.6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // 3. Cockpit Canopy (Glowing Effect)
+        ctx.fillStyle = '#a8e0ff'; 
+        ctx.beginPath();
+        ctx.arc(0, -halfSize * 0.4, halfSize * 0.25, 0, Math.PI * 2);
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = '#a8e0ff';
+        ctx.fill();
+        
+        // Reset shadow for subsequent draws
+        ctx.shadowBlur = 0;
+        ctx.shadowColor = 'transparent';
+
+        // --- Add fine stripes ---
+        ctx.strokeStyle = '#00FFFF'; 
+        ctx.lineWidth = 1.5;
+
+        ctx.beginPath();
+        ctx.moveTo(-halfSize * 0.45, -halfSize * 0.1);
+        ctx.lineTo(-halfSize * 0.35, halfSize * 0.5);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(halfSize * 0.45, -halfSize * 0.1);
+        ctx.lineTo(halfSize * 0.35, halfSize * 0.5);
+        ctx.stroke();
+
+        ctx.strokeStyle = '#FF0000'; 
+        ctx.lineWidth = 1.5;
+
+        ctx.beginPath();
+        ctx.moveTo(-halfSize * 0.8, halfSize * 0.3);
+        ctx.lineTo(-halfSize * 0.6, halfSize * 0.6);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(halfSize * 0.8, halfSize * 0.3);
+        ctx.lineTo(halfSize * 0.6, halfSize * 0.6);
+        ctx.stroke();
+
+        ctx.lineWidth = 2; 
+        
+        // NEW: Draw double shot muzzle glow
+        if (PLAYER.isDoubleShot) {
+            ctx.shadowColor = '#FFC300';
+            ctx.shadowBlur = 10;
+            ctx.fillStyle = '#FF5733';
+            // Left muzzle flash
+            ctx.fillRect(-8, -halfSize * 0.85, 4, 8);
+            // Right muzzle flash
+            ctx.fillRect(4, -halfSize * 0.85, 4, 8);
+            ctx.shadowBlur = 0;
+            ctx.shadowColor = 'transparent';
+        }
+    }
+    // --- End Custom Player Drawing Function ---
+
+    // --- Game Classes/Constructors ---
+
+    function Bullet(x, y, isEnemy = false) {
+        this.x = x;
+        this.y = y;
+        this.radius = isEnemy ? 6 : 4;
+        this.speed = isEnemy ? 7 : 10;
+        this.isEnemy = isEnemy;
+        this.color = isEnemy ? '#ff3333' : '#44AAFF'; 
+    }
+
+    Bullet.prototype.update = function() {
+        this.y += this.isEnemy ? this.speed : -this.speed;
+    };
+
+    Bullet.prototype.draw = function() {
+        ctx.globalAlpha = 1.0; 
+        
+        if (this.isEnemy) {
+            ctx.shadowColor = '#FF3333'; 
+            ctx.shadowBlur = 8;
+            
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius + 2, 0, Math.PI * 2); 
+            ctx.fillStyle = 'rgba(255, 51, 51, 0.7)'; 
+            ctx.fill();
+
+            ctx.shadowBlur = 0; 
+            
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            ctx.fillStyle = '#FFA500'; 
+            ctx.fill();
+            
+            ctx.shadowColor = 'transparent';
+            
+        } else {
+            const newHeight = this.radius * 2.6; 
+            const halfNewHeight = newHeight / 2;
+
+            ctx.shadowColor = '#26f7fd'; 
+            ctx.shadowBlur = 8; 
+            
+            ctx.beginPath();
+            ctx.rect(this.x - 3, this.y - halfNewHeight - 2, 6, newHeight + 4); 
+            ctx.fillStyle = 'rgba(38, 247, 253, 0.7)'; 
+            ctx.fill();
+
+            ctx.shadowBlur = 0; 
+            
+            ctx.beginPath();
+            ctx.rect(this.x - 2, this.y - halfNewHeight, 4, newHeight); 
+            ctx.fillStyle = '#FFFFFF'; 
+            ctx.fill();
+            
+            ctx.shadowColor = 'transparent';
+        }
+    };
+
+    function Enemy(x, y) {
+        this.x = x;
+        this.y = y;
+        this.size = 30;
+        this.speed = Math.random() * 1.5 + 0.5;
+        this.emoji = '👽'; 
+    }
+
+    Enemy.prototype.fire = function() {
+        enemyBullets.push(new Bullet(this.x, this.y + this.size * 0.6, true));
+        enemyLaserSynth.triggerAttackRelease('D3', '0.1'); 
+    };
+
+    Enemy.prototype.update = function() {
+        // Standard straight movement
+        this.y += this.speed;
+        
+        if (Math.random() < ENEMY_FIRE_CHANCE) {
+            this.fire();
+        }
+    };
+
+    Enemy.prototype.draw = function() {
+        ctx.globalAlpha = 1.0; 
+        
+        ctx.font = `${this.size}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle'; 
+        ctx.fillText(this.emoji, this.x, this.y);
+    };
+
+    // --- NEW ENEMY TYPE: Viper Drone (Randomly Moving) ---
+    function ViperDrone(x, y) {
+        this.x = x;
+        this.y = y;
+        this.size = 35; // Slightly larger
+        this.speed = Math.random() * 1 + 1.5; // Slightly faster base speed
+        this.emoji = '🤖'; // Distinct emoji
+        this.isViper = true; // Flag for differentiation
+        this.wavePhase = Math.random() * Math.PI * 2; // Sine wave starting phase
+        this.waveSpeed = 0.05; // Vertical distance to complete one wave cycle
+        this.horizontalMagnitude = 3; // Horizontal movement size
+    }
+
+    ViperDrone.prototype.fire = Enemy.prototype.fire; // Inherit firing logic
+
+    ViperDrone.prototype.update = function() {
+        this.y += this.speed;
+        
+        // Sine wave movement (random/oscillating)
+        this.x += Math.sin(this.y * this.waveSpeed + this.wavePhase) * this.horizontalMagnitude;
+
+        // Keep within bounds
+        this.x = Math.max(30, Math.min(canvas.width - 30, this.x));
+        
+        if (Math.random() < ENEMY_FIRE_CHANCE * 1.5) { // Fire slightly more often
+            this.fire();
+        }
+    };
+
+    ViperDrone.prototype.draw = function() {
+        ctx.globalAlpha = 1.0; 
+        
+        // Draw with a distinct color/shadow
+        ctx.shadowColor = '#FF00FF'; // Magenta Glow
+        ctx.shadowBlur = 10;
+        
+        ctx.font = `${this.size}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle'; 
+        ctx.fillText(this.emoji, this.x, this.y);
+
+        ctx.shadowBlur = 0; // Reset shadow
+        ctx.shadowColor = 'transparent';
+    };
+    // --- END NEW ENEMY TYPE ---
+
+
+    // --- BOSS CLASS IMPLEMENTATION (Updated - Rapid Fire Removed) ---
+    function Boss(stages) {
+        this.x = canvas.width / 2;
+        this.y = -80;
+        this.size = 80;
+        this.emoji = '👾'; 
+        
+        // Dynamic stage and health calculation
+        this.maxStages = stages; // 1, 2, 3, etc. (Also equals currentBossIndex)
+        this.stage = stages; // Start at the highest stage
+        this.maxHealth = 100 + (stages * 50); // Boss 1: 150, Boss 2: 200, Boss 3: 250
+        this.health = this.maxHealth;
+        
+        this.isAlive = true;
+        this.hitPoints = 0; 
+        
+        // Movement state
+        this.moveDirection = Math.random() < 0.5 ? 1 : -1;
+        this.moveTimer = 0;
+        // Speed scales with difficulty (stages)
+        this.moveSpeed = 1 + (stages * 0.5); 
+        this.targetY = 100;
+
+        // Attack state
+        this.fireTimer = 0;
+        
+        // Boss Rapid Fire State Removed (Moved to Player)
+    }
+
+    Boss.prototype.takeHit = function(damage = 1) {
+        if (!this.isAlive) return;
+        this.health -= damage;
+        this.hitPoints += damage;
+        
+        if (this.health <= 0) {
+            this.isAlive = false;
+            return;
+        }
+
+        // Dynamic Stage transition
+        const remainingRatio = this.health / this.maxHealth;
+        
+        // Calculate the current stage based on remaining health percentage
+        this.stage = Math.ceil(remainingRatio * this.maxStages);
+        this.stage = Math.max(1, this.stage); // Ensure stage is at least 1
+    };
+    
+    Boss.prototype.updateMovement = function() {
+        // Move to target Y position
+        if (this.y < this.targetY) {
+            this.y = Math.min(this.y + 1, this.targetY);
+            return;
+        }
+
+        // Horizontal Movement
+        // Speed increases based on base move speed and the current stage (lower stage = faster movement)
+        const currentSpeed = this.moveSpeed * (1 + (this.maxStages - this.stage) * 0.3);
+        this.x += this.moveDirection * currentSpeed; 
+        this.moveTimer++;
+
+        // Change direction when hitting boundaries or timer expires
+        if (this.x - this.size / 2 < 10 || this.x + this.size / 2 > canvas.width - 10) {
+            this.moveDirection *= -1;
+            this.moveTimer = 0;
+        } else if (this.moveTimer > 180) {
+            this.moveDirection *= -1;
+            this.moveTimer = 0;
+        }
+    };
+    
+    Boss.prototype.updateAttack = function(now) {
+        // 1. Rapid Fire State Logic REMOVED
+        
+        // 2. Determine Fire Rate
+        this.fireTimer++;
+        
+        let fireRate = 60; // Base rate (highest stage)
+        let bulletCount = 1;
+        let bulletSpread = 0;
+        
+        // Calculate base fire rate based on stage (1 is fastest/hardest)
+        fireRate = 60 - (this.maxStages - this.stage) * 15;
+        fireRate = Math.max(20, fireRate); // Cap minimum rate (Normal speed)
+
+        // Rapid Fire Modifier Logic REMOVED
+        
+
+        // Calculate bullet pattern based on stage
+        if (this.maxStages > 1 && this.stage < this.maxStages) {
+            bulletCount = 3; // Spread shot
+            bulletSpread = 15;
+        }
+        if (this.maxStages > 2 && this.stage === 1) {
+            bulletCount = 5; // Triple-fire, tight spread
+            bulletSpread = 10;
+        }
+        
+        // 3. Fire Bullets
+        if (this.fireTimer >= fireRate) {
+            this.fireTimer = 0;
+            
+            // Fire bullets
+            if (bulletCount === 1) {
+                enemyBullets.push(new Bullet(this.x, this.y + this.size * 0.6, true));
+            } else if (bulletCount === 3) {
+                for (let i = -1; i <= 1; i++) {
+                    enemyBullets.push(new Bullet(this.x + i * bulletSpread, this.y + this.size * 0.6, true));
+                }
+            } else if (bulletCount === 5) {
+                 for (let i = -2; i <= 2; i++) {
+                    enemyBullets.push(new Bullet(this.x + i * bulletSpread, this.y + this.size * 0.6, true));
+                }
+            }
+
+            enemyLaserSynth.triggerAttackRelease('E3', '0.1');
+        }
+    };
+
+    Boss.prototype.update = function(now) {
+        this.updateMovement();
+        this.updateAttack(now);
+    };
+
+    Boss.prototype.drawHealthBar = function() {
+        const barWidth = 150;
+        const barHeight = 15;
+        const x = this.x - barWidth / 2;
+        const y = this.y - this.size / 2 - barHeight - 10;
+        const currentWidth = (this.health / this.maxHealth) * barWidth;
+
+        // Background (Empty Health)
+        ctx.fillStyle = '#444444';
+        ctx.fillRect(x, y, barWidth, barHeight);
+
+        // Current Health (Gradient based on stage)
+        let color;
+        if (this.stage === this.maxStages) color = '#00FF00'; // Green (highest stage/easiest)
+        else if (this.stage === 1) color = '#FF0000'; // Red (lowest stage/hardest)
+        else color = '#FFFF00'; // Yellow
+        
+        ctx.fillStyle = color;
+        ctx.fillRect(x, y, currentWidth, barHeight);
+
+        // Border
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, barWidth, barHeight);
+        
+        // Stage Text
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = '12px Inter';
+        ctx.textAlign = 'center';
+        ctx.fillText(`STAGE ${this.stage}/${this.maxStages}`, this.x, y - 5);
+        
+        // Rapid Fire Indicator REMOVED
+    };
+
+    Boss.prototype.draw = function() {
+        ctx.globalAlpha = 1.0; 
+        
+        // Draw health bar first
+        this.drawHealthBar();
+
+        // Add a strong glow for the boss (Static glow, rapid fire glow removed)
+        ctx.shadowColor = '#8A2BE2'; 
+        ctx.shadowBlur = 20;
+
+        ctx.font = `${this.size}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle'; 
+        ctx.fillText(this.emoji, this.x, this.y);
+
+        ctx.shadowBlur = 0; // Reset shadow
+        ctx.shadowColor = 'transparent';
+    };
+    // --- END BOSS CLASS ---
+
+
+    // Collectible Class 
+    function Collectible(x, y, forcedType = null) {
+        this.x = x;
+        this.y = y;
+        this.size = 25;
+        this.radius = this.size / 2;
+        this.speed = 1.5; 
+        
+        if (!forcedType) {
+            const r = Math.random();
+            if (r < DOUBLE_SHOT_CHANCE) {
+                this.type = 'doubleshot';
+            } else if (r < DOUBLE_SHOT_CHANCE + ENERGY_CELL_CHANCE) {
+                this.type = 'energy';
+            } else if (r < DOUBLE_SHOT_CHANCE + ENERGY_CELL_CHANCE + RAPID_FIRE_CHANCE) { // NEW CHECK
+                this.type = 'rapidfire';
+            } else {
+                this.type = 'trash';
+            }
+        } else {
+            this.type = forcedType;
+        }
+
+        if (this.type === 'energy') {
+            this.emoji = '🔋'; 
+            this.effect = 'life';
+            this.glowColor = '#00FF00';
+        } else if (this.type === 'doubleshot') {
+            this.emoji = '💥'; 
+            this.effect = 'upgrade';
+            this.glowColor = '#FFC300';
+        } else if (this.type === 'rapidfire') { // NEW
+            this.emoji = '⚡'; 
+            this.effect = 'upgrade';
+            this.glowColor = '#44AAFF';
+        } else {
+            this.emoji = '🔩'; // Scrap Metal
+            this.effect = 'score';
+            this.glowColor = '#888888';
+        }
+    }
+
+    Collectible.prototype.update = function() {
+        this.y += this.speed;
+    };
+
+    Collectible.prototype.draw = function() {
+        ctx.globalAlpha = 1.0; 
+        
+        if (this.type !== 'trash') { // Only non-trash items get the glow
+            ctx.shadowColor = this.glowColor; 
+            ctx.shadowBlur = 12;
+        }
+
+        ctx.font = `${this.size}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle'; 
+        ctx.fillText(this.emoji, this.x, this.y);
+
+        ctx.shadowBlur = 0; // Reset shadow
+        ctx.shadowColor = 'transparent';
+    };
+
+
+    // Explosion Class (unchanged)
+    function Explosion(x, y, particleCount = 15, scale = 1) {
+        this.x = x;
+        this.y = y;
+        this.particles = [];
+        this.isFinished = false;
+
+        const maxParticles = particleCount;
+
+        for (let i = 0; i < maxParticles; i++) {
+            this.particles.push({
+                x: x,
+                y: y,
+                // Scale radius and speed
+                radius: (Math.random() * 3 + 1) * scale * 0.7,
+                color: Math.random() < 0.5 ? '#FFD700' : '#FF4500', 
+                vx: (Math.random() - 0.5) * 4 * scale * 0.5,
+                vy: (Math.random() - 0.5) * 4 * scale * 0.5,
+                alpha: 1,
+                life: Math.random() * 40 + 20 * scale 
+            });
+        }
+    }
+
+    Explosion.prototype.update = function() {
+        let activeParticles = 0;
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+            const p = this.particles[i];
+
+            p.x += p.vx;
+            p.y += p.vy;
+
+            p.life--;
+            p.alpha = p.life / 60; 
+
+            if (p.life > 0) {
+                activeParticles++;
+            }
+        }
+
+        if (activeParticles === 0) {
+            this.isFinished = true;
+        }
+    };
+
+    Explosion.prototype.draw = function() {
+        this.particles.forEach(p => {
+            if (p.life > 0) {
+                const colorBase = p.color === '#FFD700' ? '255,215,0' : '255,69,0';
+                ctx.fillStyle = `rgba(${colorBase}, ${p.alpha})`;
+                
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        });
+    };
+    
+    // Starfield Class (unchanged)
+    const STAR_LAYERS = [
+        { count: 150, speedFactor: 0.3, minSize: 0.5, maxSize: 1.5, color: '#444455', minAlpha: 0.2, maxAlpha: 0.5 },
+        { count: 70, speedFactor: 0.8, minSize: 1.5, maxSize: 2.5, color: '#AADDFF', minAlpha: 0.5, maxAlpha: 0.8 },
+        { count: 30, speedFactor: 1.5, minSize: 2.5, maxSize: 4.0, color: '#FFFFFF', minAlpha: 0.8, maxAlpha: 1.0 },
+    ];
+    let stars = [];
+
+    function Star(layerConfig) {
+        this.x = Math.random() * canvas.width;
+        this.y = Math.random() * canvas.height;
+        this.size = Math.random() * (layerConfig.maxSize - layerConfig.minSize) + layerConfig.minSize; 
+        this.speed = (Math.random() * 1.5 + 0.5) * layerConfig.speedFactor; 
+        this.color = layerConfig.color;
+        this.alpha = Math.random() * (layerConfig.maxAlpha - layerConfig.minAlpha) + layerConfig.minAlpha;
+    }
+
+    Star.prototype.update = function() {
+        this.y += this.speed;
+        if (this.y > canvas.height) {
+            this.y = 0;
+            this.x = Math.random() * canvas.width; 
+        }
+    };
+
+    Star.prototype.draw = function() {
+        ctx.globalAlpha = this.alpha; 
+        ctx.fillStyle = this.color; 
+        
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size / 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.globalAlpha = 1.0; 
+    };
+
+    // --- Core Game Functions ---
+
+    function resizeCanvas() {
+        const container = document.getElementById('game-container');
+        canvas.width = container.clientWidth;
+        canvas.height = container.clientHeight;
+        PLAYER.x = canvas.width / 2;
+        PLAYER.y = canvas.height - PLAYER.size;
+
+        stars = [];
+        STAR_LAYERS.forEach(layer => {
+            for (let i = 0; i < layer.count; i++) {
+                stars.push(new Star(layer));
+            }
+        });
+        
+        // If boss exists, reposition it on resize
+        if (currentBoss) {
+            currentBoss.x = canvas.width / 2;
+        }
+    }
+
+    function takeHit() {
+        if (PLAYER.isInvincible) return;
+
+        PLAYER.lives--;
+        explosionSynth.triggerAttackRelease('0.3', Tone.now() + soundScheduleOffset, 0.5); 
+        soundScheduleOffset += 0.001; 
+        
+        if (PLAYER.lives <= 0) {
+            gameOver();
+        } else {
+            PLAYER.isInvincible = true;
+            PLAYER.invincibilityStartTime = performance.now();
+        }
+    }
+    
+    function updateInvincibility(now) {
+        if (PLAYER.isInvincible) {
+            if (now - PLAYER.invincibilityStartTime > PLAYER.invincibilityDuration) {
+                PLAYER.isInvincible = false;
+            }
+        }
+    }
+
+    /**
+     * Handles powerup duration timeouts. 
+     * NOTE: When a qualifying boss (Boss 2+) is active, the PLAYER.isRapidFire state
+     * is controlled entirely by updateBossMechanics, overriding any collectible duration.
+     */
+    function updatePowerups(now) {
+        // Double Shot Timeout
+        if (PLAYER.isDoubleShot && now > PLAYER.doubleShotEndTime) {
+            PLAYER.isDoubleShot = false;
+        }
+        
+        const isBossAutoFireActive = currentBoss && currentBossIndex >= 2;
+
+        // Collectible Rapid Fire Timeout: Only allow the collectible to expire if no boss override is active
+        if (!isBossAutoFireActive && PLAYER.isRapidFire && now > PLAYER.rapidFireEndTime) {
+            PLAYER.isRapidFire = false;
+        }
+    }
+    
+    // --- NEW: Boss Mechanics (Auto Rapid Fire) ---
+    function updateBossMechanics(now) {
+        // 1. Check Activation Condition: Boss 2 or higher is active
+        if (!currentBoss || currentBossIndex < 2) {
+            rapidFireCycleStartTime = 0; // Reset for next boss spawn
+            // We do NOT set PLAYER.isRapidFire here. It should be managed by updatePowerups if a collectible was active.
+            return;
+        }
+
+        // 2. Initialize Cycle Timer on first appearance of Boss 2+
+        if (rapidFireCycleStartTime === 0) {
+            rapidFireCycleStartTime = now;
+        }
+
+        // 3. Calculate position within the 20-second cycle
+        const elapsedTime = now - rapidFireCycleStartTime;
+        const cyclePosition = elapsedTime % BOSS_RAPID_FIRE_CYCLE_MS;
+
+        // 4. Set Player Rapid Fire State
+        if (cyclePosition < BOSS_RAPID_FIRE_DURATION_MS) {
+            // First 10 seconds (0ms to 9999ms): RAPID FIRE ON
+            PLAYER.isRapidFire = true;
+        } else {
+            // Next 10 seconds (10000ms to 19999ms): COOLDOWN OFF
+            // This overrides any collectible state during the boss fight, as requested.
+            PLAYER.isRapidFire = false;
+        }
+    }
+    // --- END Boss Mechanics ---
+
+
+    function initGame() {
+        score = 0;
+        PLAYER.lives = 3; // Start with 3 lives
+        PLAYER.isInvincible = false; 
+        PLAYER.isDoubleShot = false; 
+        PLAYER.doubleShotEndTime = 0; 
+        PLAYER.isRapidFire = false; // NEW
+        PLAYER.rapidFireEndTime = 0; // NEW
+        PLAYER.x = canvas.width / 2;
+        PLAYER.y = canvas.height - PLAYER.size;
+        PLAYER.bullets = [];
+        enemyBullets = [];
+        enemies = [];
+        explosions = []; 
+        collectibles = []; 
+        currentBoss = null; 
+        currentBossIndex = 0; // Reset boss index
+        rapidFireCycleStartTime = 0; // Initialize cycle timer
+        Tone.Transport.bpm.value = 140; // Reset tempo
+        gameState = 'PLAYING';
+        
+        overlay.classList.add('hidden');
+        
+        if (Tone.context.state !== 'running') {
+            Tone.context.resume();
+        }
+        
+        Tone.Transport.start(); 
+
+        if (!gameLoopId) {
+            gameLoopId = requestAnimationFrame(gameLoop);
+        }
+    }
+
+    // --- Screen Shake Functionality (unchanged) ---
+    function screenShake(duration = SCREEN_SHAKE_DURATION, intensity = SCREEN_SHAKE_INTENSITY) {
+        screenShakeTimer = duration;
+        screenShakeIntensity = intensity;
+    }
+
+    function updateScreenShake() {
+        if (screenShakeTimer > 0) {
+            screenShakeTimer--;
+            const xOffset = (Math.random() - 0.5) * SCREEN_SHAKE_INTENSITY;
+            const yOffset = (Math.random() - 0.5) * SCREEN_SHAKE_INTENSITY;
+            // Apply translation to the game container
+            gameContainer.style.transform = `translate(${xOffset}px, ${yOffset}px)`;
+        } else {
+            gameContainer.style.transform = 'translate(0, 0)';
+        }
+    }
+    // --- End Screen Shake ---
+
+    function drawHeart(x, y, size) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.translate(x, y); 
+        
+        const scale = size / 22; 
+        ctx.moveTo(0, 10 * scale);
+        ctx.bezierCurveTo(-1 * scale, 7 * scale, -7 * scale, 5 * scale, -7 * scale, 0);
+        ctx.bezierCurveTo(-7 * scale, -8 * scale, -1 * scale, -8 * scale, 0, -3 * scale);
+        ctx.bezierCurveTo(1 * scale, -8 * scale, 7 * scale, -8 * scale, 7 * scale, 0);
+        ctx.bezierCurveTo(7 * scale, 5 * scale, 1 * scale, 7 * scale, 0, 10 * scale);
+        
+        ctx.closePath();
+        
+        const heartColor = PLAYER.lives > 1 ? '#f43f5e' : '#dc2626'; 
+        ctx.fillStyle = heartColor;
+        ctx.shadowColor = heartColor;
+        ctx.shadowBlur = 10;
+        
+        ctx.fill();
+        ctx.restore();
+    }
+
+    function drawLives() {
+        const heartSize = 22; 
+        const spacing = heartSize + 10; 
+        for (let i = 0; i < PLAYER.lives; i++) {
+            // Draw hearts starting from the right, ensuring we don't draw past MAX_LIVES
+            if (i < MAX_LIVES) { 
+                drawHeart(canvas.width - 30 - (i * spacing), 25, heartSize);
+            }
+        }
+        // If lives are less than max, draw outlines for empty hearts
+        for (let i = PLAYER.lives; i < MAX_LIVES; i++) {
+             ctx.strokeStyle = '#374151'; // Darker grey for empty slot
+             ctx.lineWidth = 2;
+             
+             ctx.save();
+             ctx.beginPath();
+             const x = canvas.width - 30 - (i * spacing);
+             const y = 25;
+             const scale = heartSize / 22; 
+             ctx.translate(x, y); 
+             ctx.moveTo(0, 10 * scale);
+             ctx.bezierCurveTo(-1 * scale, 7 * scale, -7 * scale, 5 * scale, -7 * scale, 0);
+             ctx.bezierCurveTo(-7 * scale, -8 * scale, -1 * scale, -8 * scale, 0, -3 * scale);
+             ctx.bezierCurveTo(1 * scale, -8 * scale, 7 * scale, -8 * scale, 7 * scale, 0);
+             ctx.bezierCurveTo(7 * scale, 5 * scale, 1 * scale, 7 * scale, 0, 10 * scale);
+             ctx.closePath();
+             ctx.stroke();
+             ctx.restore();
+        }
+    }
+
+    function drawScore() {
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '24px Inter';
+        ctx.textAlign = 'left';
+        ctx.shadowBlur = 0;
+        ctx.shadowColor = 'transparent';
+        ctx.fillText(`Score: ${score}`, 10, 30);
+        
+        // Next Boss Indicator
+        const nextBossScore = BOSS_BASE_SPAWN_INTERVAL * (currentBossIndex + 1);
+        const nextBossText = currentBoss ? "Boss Incoming!" : `Next Boss: ${nextBossScore}`;
+        ctx.font = '16px Inter';
+        ctx.fillStyle = currentBoss ? '#dc2626' : '#60a5fa'; // Red if active, Blue otherwise
+        ctx.fillText(nextBossText, 10, 55);
+    }
+    
+    // Draw powerup status (Updated to handle both Double Shot and Rapid Fire, including auto-cycle)
+    function drawPowerupStatus(now) {
+        let activePowerups = [];
+        const isBossAutoFireActive = currentBoss && currentBossIndex >= 2;
+
+        // 1. Check Double Shot (Collectible only)
+        if (PLAYER.isDoubleShot) {
+            const timeLeftMs = PLAYER.doubleShotEndTime - now;
+            activePowerups.push({
+                text: '💥 DOUBLE SHOT',
+                time: Math.max(0, Math.ceil(timeLeftMs / 1000)),
+                duration: PLAYER.DOUBLE_SHOT_DURATION,
+                timeLeftMs: timeLeftMs,
+                color: '#facc15' // Amber
+            });
+        }
+        
+        // 2. Check Boss Auto-Rapid Fire Status (Boss 2+)
+        if (isBossAutoFireActive) {
+            const elapsedTime = now - rapidFireCycleStartTime;
+            const cyclePosition = elapsedTime % BOSS_RAPID_FIRE_CYCLE_MS;
+            const isOn = cyclePosition < BOSS_RAPID_FIRE_DURATION_MS;
+
+            let timeLeftInState;
+            let puDuration;
+            let puColor;
+            let puText;
+
+            if (isOn) {
+                // ON state: 10 seconds
+                timeLeftInState = BOSS_RAPID_FIRE_DURATION_MS - cyclePosition;
+                puDuration = BOSS_RAPID_FIRE_DURATION_MS;
+                puColor = '#FFD700'; // Gold
+                puText = `⚡ AUTO FIRE: ON`;
+            } else {
+                // COOLDOWN state: 10 seconds
+                timeLeftInState = BOSS_RAPID_FIRE_CYCLE_MS - cyclePosition;
+                puDuration = BOSS_RAPID_FIRE_CYCLE_MS - BOSS_RAPID_FIRE_DURATION_MS; // 10000ms
+                puColor = '#5e5e5e'; // Dark Grey
+                puText = `SLOW FIRE: COOLDOWN`;
+            }
+            
+            // Add the cycle indicator
+            activePowerups.push({
+                text: `${puText} (${Math.ceil(timeLeftInState / 1000)}s)`,
+                time: Math.max(0, Math.ceil(timeLeftInState / 1000)),
+                duration: puDuration,
+                timeLeftMs: timeLeftInState,
+                color: puColor,
+            });
+        }
+        
+        // 3. Check Collectible Rapid Fire Status (Only if NO boss override is active)
+        if (!isBossAutoFireActive && PLAYER.isRapidFire && now < PLAYER.rapidFireEndTime) {
+            const timeLeftMs = PLAYER.rapidFireEndTime - now;
+            activePowerups.push({
+                text: '⚡ RAPID FIRE (P/U)',
+                time: Math.max(0, Math.ceil(timeLeftMs / 1000)),
+                duration: PLAYER.RAPID_FIRE_DURATION,
+                timeLeftMs: timeLeftMs,
+                color: '#44AAFF' // Light Blue
+            });
+        }
+        
+        if (activePowerups.length === 0) return;
+
+        const barWidth = 150;
+        const barHeight = 20;
+        const x = canvas.width / 2;
+        
+        activePowerups.forEach((pu, index) => {
+            const barY = 50 + (index * (barHeight + 5)); // Stack powerups vertically
+            const xLeft = x - barWidth / 2;
+            
+            const text = pu.text;
+
+            ctx.font = '16px Inter';
+            ctx.textAlign = 'center';
+            
+            // Background bar
+            ctx.fillStyle = '#1e293b'; // Slate 800
+            ctx.fillRect(xLeft, barY, barWidth, barHeight);
+            
+            // Progress bar - uses timeLeftMs / duration to show countdown progress
+            const currentWidth = (pu.timeLeftMs / pu.duration) * barWidth;
+            
+            ctx.fillStyle = pu.color; 
+            ctx.fillRect(xLeft, barY, currentWidth, barHeight);
+            
+            // Text overlay
+            ctx.fillStyle = '#ffffff';
+            ctx.shadowColor = '#000000';
+            ctx.shadowBlur = 4;
+            ctx.fillText(text, x, barY + 15);
+            ctx.shadowBlur = 0;
+        });
+    }
+
+
+    function updatePlayer() {
+        if (keys.ArrowLeft || keys.A) {
+            PLAYER.x -= PLAYER.speed;
+        }
+        if (keys.ArrowRight || keys.D) {
+            PLAYER.x += PLAYER.speed;
+        }
+
+        PLAYER.x = Math.max(PLAYER.size / 2, Math.min(canvas.width - PLAYER.size / 2, PLAYER.x));
+
+        // Get the current fire rate based on the rapid fire state (set by collectible or boss mechanic)
+        const currentFireRate = PLAYER.isRapidFire ? PLAYER.RAPID_FIRE_RATE : PLAYER.fireRate;
+
+        const now = performance.now();
+        // Use the dynamic fire rate
+        if (keys.Space && PLAYER.bullets.length < PLAYER.maxBullets && (now - PLAYER.lastShotTime) > currentFireRate) {
+            
+            const bulletY = PLAYER.y - PLAYER.size * 0.7;
+            
+            if (PLAYER.isDoubleShot) {
+                // Double shot: two bullets with offset
+                PLAYER.bullets.push(new Bullet(PLAYER.x - 10, bulletY)); 
+                PLAYER.bullets.push(new Bullet(PLAYER.x + 10, bulletY)); 
+            } else {
+                // Standard shot
+                PLAYER.bullets.push(new Bullet(PLAYER.x, bulletY)); 
+            }
+            
+            PLAYER.lastShotTime = now;
+            
+            laserSynth.triggerAttackRelease('C5', '0.05'); 
+        }
+    }
+
+    function updateEnemies() {
+        enemySpawnTimer++;
+        if (enemySpawnTimer >= ENEMY_SPAWN_RATE) {
+            const x = Math.random() * (canvas.width - 60) + 30;
+            
+            // Spawns: 
+            // If currentBossIndex > 0 (at least one boss defeated), 
+            // 30% chance to spawn a Viper Drone, 70% chance for normal Enemy.
+            if (currentBossIndex > 0 && Math.random() < 0.3) { 
+                enemies.push(new ViperDrone(x, -30));
+            } else {
+                enemies.push(new Enemy(x, -30));
+            }
+            
+            enemySpawnTimer = 0;
+        }
+
+        for (let i = enemies.length - 1; i >= 0; i--) {
+            enemies[i].update();
+            if (enemies[i].y > canvas.height + enemies[i].size) {
+                // Only take hit if there is no boss active
+                if (!currentBoss) {
+                    takeHit(); 
+                }
+                enemies.splice(i, 1);
+            }
+        }
+    }
+    
+    function updateBullets() {
+        PLAYER.bullets = PLAYER.bullets.filter(bullet => {
+            bullet.update();
+            return bullet.y > -bullet.radius; 
+        });
+
+        enemyBullets = enemyBullets.filter(bullet => {
+            bullet.update();
+            return bullet.y < canvas.height + bullet.radius; 
+        });
+    }
+
+    function updateCollectibles() {
+        collectibles = collectibles.filter(c => {
+            c.update();
+            return c.y < canvas.height + c.radius; 
+        });
+    }
+
+
+    function updateExplosions() {
+        explosions = explosions.filter(explosion => {
+            explosion.update();
+            return !explosion.isFinished;
+        });
+    }
+
+    function checkCircleCollision(x1, y1, r1, x2, y2, r2) {
+        const dx = x1 - x2;
+        const dy = y1 - y2;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        return distance < r1 + r2;
+    }
+
+
+    function checkCollisions() {
+        // 1. Player Bullet vs Enemy / Boss
+        PLAYER.bullets = PLAYER.bullets.filter(bullet => {
+            let hit = false;
+            
+            // Check Boss collision first
+            if (currentBoss && currentBoss.isAlive) {
+                const distanceX = bullet.x - currentBoss.x;
+                const distanceY = bullet.y - currentBoss.y;
+                const distance = Math.sqrt(distanceX * distanceX + distanceY * distanceY);
+
+                if (distance < bullet.radius + currentBoss.size / 2) {
+                    currentBoss.takeHit(1);
+                    hit = true; 
+                    
+                    if (!currentBoss.isAlive) {
+                        // Boss was defeated!
+
+                        // NEW: Big Explosion, Stronger Shake, and Full Health Restore
+                        screenShake(50, 15); // Longer, more intense shake
+                        // Play a louder, longer explosion sound for boss defeat
+                        explosionSynth.triggerAttackRelease('0.8', Tone.now() + soundScheduleOffset, 0.8); 
+                        soundScheduleOffset += 0.001; 
+
+                        // 1. Big Explosion: 150 particles, 4x scale
+                        explosions.push(new Explosion(currentBoss.x, currentBoss.y, 150, 4));
+
+                        // 2. Full Health Restore (Max 5 lives)
+                        PLAYER.lives = MAX_LIVES; 
+                        
+                        // 3. Score bonus and cleanup
+                        score += 90 * currentBoss.maxStages; 
+                        currentBoss = null;
+                        Tone.Transport.bpm.value = 140; // Reset tempo after boss kill
+                    }
+                }
+            }
+
+            // Check normal enemy collision only if no boss is active or bullet didn't hit boss
+            if (!currentBoss || !hit) {
+                enemies = enemies.filter(enemy => {
+                    const distanceX = bullet.x - enemy.x;
+                    const distanceY = bullet.y - enemy.y;
+                    const distance = Math.sqrt(distanceX * distanceX + distanceY * distanceY);
+
+                    if (distance < bullet.radius + enemy.size / 2) {
+                        hit = true; 
+                        score += 10;
+                        
+                        if (Math.random() < DROP_CHANCE) {
+                            collectibles.push(new Collectible(enemy.x, enemy.y));
+                        }
+
+                        // Use default small explosion
+                        explosions.push(new Explosion(enemy.x, enemy.y)); 
+                        explosionSynth.triggerAttackRelease('0.2', Tone.now() + soundScheduleOffset); 
+                        soundScheduleOffset += 0.001; 
+
+                        return false; 
+                    }
+                    return true; 
+                });
+            }
+            return !hit && bullet.y > -bullet.radius; 
+        });
+
+        // 2. Enemy / Boss vs Player (Collision) 
+        let entities = [...enemies];
+        if (currentBoss && currentBoss.isAlive) {
+             entities.push(currentBoss);
+        }
+        
+        for (let i = entities.length - 1; i >= 0; i--) {
+            const entity = entities[i];
+            const size = entity === currentBoss ? currentBoss.size : entity.size;
+
+            const distanceX = PLAYER.x - entity.x;
+            const distanceY = PLAYER.y - entity.y;
+            const distance = Math.sqrt(distanceX * distanceX + distanceY * distanceY);
+
+            if (distance < PLAYER.size / 2 + size / 2) {
+                if (entity !== currentBoss) {
+                     // Enemy is destroyed regardless of player invincibility
+                    explosions.push(new Explosion(entity.x, entity.y));
+                    explosionSynth.triggerAttackRelease('0.2', Tone.now() + soundScheduleOffset);
+                    soundScheduleOffset += 0.001; 
+                    enemies.splice(i, 1); 
+                }
+                
+                takeHit(); // Player takes damage
+                if (gameState !== 'PLAYING') return;
+            }
+        }
+
+        // 3. Enemy Bullet vs Player
+        enemyBullets = enemyBullets.filter(bullet => {
+            const distanceX = PLAYER.x - bullet.x;
+            const distanceY = PLAYER.y - bullet.y;
+            const distance = Math.sqrt(distanceX * distanceX + distanceY * distanceY);
+
+            if (distance < PLAYER.size / 2 + bullet.radius) {
+                if (!PLAYER.isInvincible) {
+                    takeHit(); 
+                    return false; 
+                }
+                return true; 
+            }
+            return true; 
+        });
+
+        // 4. Collectible vs Player Collision
+        const now = performance.now();
+        collectibles = collectibles.filter(c => {
+            const isColliding = checkCircleCollision(
+                PLAYER.x, PLAYER.y, PLAYER.size / 2, 
+                c.x, c.y, c.radius
+            );
+
+            if (isColliding) {
+                playCollectSound(c.type); 
+
+                if (c.type === 'energy') {
+                    PLAYER.lives = Math.min(PLAYER.lives + 1, MAX_LIVES); 
+                } else if (c.type === 'doubleshot') {
+                    // Activate Double Shot
+                    PLAYER.isDoubleShot = true;
+                    PLAYER.doubleShotEndTime = now + PLAYER.DOUBLE_SHOT_DURATION;
+                } else if (c.type === 'rapidfire') { // NEW: Activate Rapid Fire
+                    PLAYER.isRapidFire = true;
+                    // Note: If Boss 2+ is active, the duration here is irrelevant as it's overridden by the cycle, but we set it for non-boss cleanup.
+                    PLAYER.rapidFireEndTime = now + PLAYER.RAPID_FIRE_DURATION; 
+                } else if (c.type === 'trash') {
+                    score += 1; // 1 point for scrap metal
+                }
+                return false; 
+            }
+            return true; 
+        });
+    }
+
+    function draw() {
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height); 
+
+        ctx.globalAlpha = 1.0; 
+
+        // 1. Draw Stars
+        stars.forEach(star => star.draw()); 
+
+        // 2. Draw Player Bullets
+        PLAYER.bullets.forEach(bullet => bullet.draw());
+        
+        // 3. Draw Enemy Bullets
+        enemyBullets.forEach(bullet => bullet.draw());
+
+        // 4. Draw Collectibles
+        collectibles.forEach(c => c.draw());
+
+        // 5. Draw Enemies
+        enemies.forEach(enemy => enemy.draw());
+        
+        // 6. Draw Boss (if active)
+        if (currentBoss && currentBoss.isAlive) {
+            currentBoss.draw();
+        }
+
+        // 7. Draw Player
+        ctx.save(); 
+        
+        if (PLAYER.isInvincible) {
+            const flashRate = 0.05; 
+            ctx.globalAlpha = (Math.sin(performance.now() * flashRate) > 0) ? 0.3 : 1.0;
+        } else {
+            ctx.globalAlpha = 1.0;
+        }
+        
+        ctx.translate(PLAYER.x, PLAYER.y + (PLAYER.size * 0.15)); 
+        drawPlayer(ctx);
+        ctx.restore(); 
+
+        ctx.globalAlpha = 1.0; 
+
+        // 8. Draw UI Elements (Score, Lives, Powerup)
+        const now = performance.now();
+        drawScore();
+        drawLives(); 
+        drawPowerupStatus(now); // Updated to handle multiple powerups
+
+        // 9. Draw Explosions
+        explosions.forEach(explosion => explosion.draw());
+    }
+
+    function gameLoop(currentTime) {
+        if (gameState !== 'PLAYING') {
+            cancelAnimationFrame(gameLoopId);
+            gameLoopId = null;
+            return;
+        }
+
+        const deltaTime = currentTime - lastTime;
+        const now = currentTime;
+        
+        if (deltaTime > FRAME_INTERVAL) {
+            soundScheduleOffset = 0.001; 
+
+            // --- BOSS SPAWN AND UPDATE LOGIC ---
+            const nextBossScore = BOSS_BASE_SPAWN_INTERVAL * (currentBossIndex + 1);
+
+            if (!currentBoss && score >= nextBossScore) {
+                currentBossIndex++; // Boss 1, Boss 2, Boss 3...
+                const stages = currentBossIndex; // 1 stage for Boss 1, 2 for Boss 2, etc.
+                
+                currentBoss = new Boss(stages); // Initialize boss with correct stage count
+                Tone.Transport.bpm.value = 140 + (currentBossIndex * 10); // Increase tempo slightly per boss
+                
+                enemies = []; // Clear normal enemies when boss appears
+                enemyBullets = []; // Clear current enemy bullets
+                collectibles = []; // Clear any lingering collectibles
+                
+                // --- GUARANTEED DOUBLE SHOT ON BOSS SPAWN (The Fix) ---
+                PLAYER.isDoubleShot = true;
+                PLAYER.doubleShotEndTime = now + PLAYER.DOUBLE_SHOT_DURATION;
+                powerupSynth.triggerAttackRelease('C4', '0.2'); // Play powerup sound
+                
+                // --- NEW: Reset Auto Rapid Fire Cycle on Boss Spawn ---
+                rapidFireCycleStartTime = now;
+            }
+
+            if (currentBoss && currentBoss.isAlive) {
+                currentBoss.update(now); 
+                updateBossMechanics(now); // NEW: Run the auto-rapid fire cycle
+                // When boss is active, normal enemies do not spawn/update
+            } else {
+                updateEnemies();
+                // Reset tempo if no boss is active
+                Tone.Transport.bpm.value = 140; 
+                // Clear out mechanics state if needed
+                updateBossMechanics(now);
+            }
+            // --- END BOSS LOGIC ---
+
+            updatePlayer();
+            updateBullets(); 
+            updateCollectibles(); 
+            updateExplosions(); 
+            
+            // Time-based updates
+            updateInvincibility(now); 
+            updatePowerups(now); 
+            updateScreenShake(); 
+
+            stars.forEach(star => star.update());
+
+            checkCollisions();
+            draw();
+            lastTime = currentTime - (deltaTime % FRAME_INTERVAL);
+        }
+
+        gameLoopId = requestAnimationFrame(gameLoop);
+    }
+
+    function gameOver() {
+        gameState = 'GAME_OVER';
+        cancelAnimationFrame(gameLoopId);
+        gameLoopId = null;
+        
+        Tone.Transport.stop();
+        
+        playSoundGameOver(); 
+
+        document.getElementById('overlay-title').textContent = 'GAME OVER';
+        document.getElementById('overlay-message').innerHTML = `Final Score: <span class="text-3xl font-bold text-green-400">${score}</span><br>You were hit by enemy fire or collision, or an enemy passed your ship. Prepare for your next deployment.`;
+        startButton.textContent = 'Play Again';
+        overlay.classList.remove('hidden'); 
+    }
+
+    // --- Input Handling (unchanged) ---
+
+    document.addEventListener('keydown', (e) => {
+        switch (e.code) {
+            case 'ArrowLeft':
+            case 'KeyA':
+                keys.ArrowLeft = keys.KeyA = true;
+                break;
+            case 'ArrowRight':
+            case 'KeyD':
+                keys.ArrowRight = keys.KeyD = true;
+                break;
+            case 'Space':
+                keys.Space = true;
+                e.preventDefault(); 
+                break;
+        }
+    });
+
+    document.addEventListener('keyup', (e) => {
+        switch (e.code) {
+            case 'ArrowLeft':
+            case 'KeyA':
+                keys.ArrowLeft = keys.KeyA = false;
+                break;
+            case 'ArrowRight':
+            case 'KeyD':
+                keys.ArrowRight = keys.KeyD = false;
+                break;
+            case 'Space':
+                keys.Space = false;
+                break;
+        }
+    });
+
+    // --- Touch/Mobile Controls (unchanged) ---
+
+    canvas.addEventListener('click', (e) => {
+        if (gameState === 'PLAYING') {
+            const rect = canvas.getBoundingClientRect();
+            const clickY = e.clientY - rect.top;
+            
+            if (clickY < canvas.height - 50) {
+                keys.Space = true;
+                setTimeout(() => { keys.Space = false; }, 50); 
+            }
+        }
+    });
+    
+    const moveLeftBtn = document.getElementById('moveLeft');
+    const moveRightBtn = document.getElementById('moveRight');
+
+    const startAction = (key) => (e) => { 
+        keys[key] = true; 
+        e.preventDefault(); 
+    };
+    const stopAction = (key) => (e) => { 
+        keys[key] = false; 
+        e.preventDefault(); 
+    };
+
+    moveLeftBtn.addEventListener('touchstart', startAction('ArrowLeft'));
+    moveLeftBtn.addEventListener('touchend', stopAction('ArrowLeft'));
+    moveLeftBtn.addEventListener('touchcancel', stopAction('ArrowLeft'));
+
+    moveRightBtn.addEventListener('touchstart', startAction('ArrowRight'));
+    moveRightBtn.addEventListener('touchend', stopAction('ArrowRight'));
+    moveRightBtn.addEventListener('touchcancel', stopAction('ArrowRight'));
+
+
+    // --- Initialization (unchanged) ---
+
+    window.onload = function() {
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        
+        const splashScreen = document.getElementById('splash-screen'); 
+        const mainOverlay = document.getElementById('overlay'); 
+
+        setTimeout(() => {
+            splashScreen.classList.add('opacity-0'); 
+            mainOverlay.classList.remove('hidden'); 
+            
+            setTimeout(() => {
+                splashScreen.classList.add('hidden'); 
+            }, 1000); 
+
+        }, 2000); 
+
+        startButton.addEventListener('click', () => {
+            if (!synth) {
+                initAudio();
+            }
+            initGame();
+        });
+        
+        draw(); 
+    }
+
+</script>
+</body>
+</html>
